@@ -1,0 +1,6 @@
+-m markdown
+--private
+--protected
+--embed-mixins
+--default-return void
+**/*.rb
