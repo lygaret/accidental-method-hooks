@@ -1,6 +1,6 @@
 require "minitest/mock"
 require "minitest/autorun"
-require "./method-hooks"
+require "./accidental/method-hooks"
 
 describe Accidental::MethodHooks do
 

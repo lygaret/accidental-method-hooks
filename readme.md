@@ -80,5 +80,5 @@ t.startup("other mode")
 Add this repo to your `Gemfile`:
 
 ```ruby
-gem "method-hooks", "~> 0", git: "https://gist.github.com/f231f31f751c64e650d3993671fc8f6d.git"
+gem "method-hooks", "~> 0", git: "https://github.com/lygaret/accidental-method-hooks.git"
 ```
