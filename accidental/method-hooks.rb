@@ -38,22 +38,22 @@ module Accidental
     VALID_HOOKS = %i[before after around error].freeze
 
     def self.included(mod)
+      mod.const_set(:HookHost, Module.new)
+
       mod.extend ClassMethods
-      mod.prepend InstanceMethods
+      mod.prepend mod::HookHost
     end
 
-    module InstanceMethods
-      def initialize(...)
-        super(...)
-
-        # instance level hooks, through singleton classes
-        singleton_class.extend ClassMethods
-      end
-
-      def hook(...) = singleton_class.hook(...)
-    end
+    # @see ClassMethods#hook
+    def hook(...) = singleton_class.hook(...)
 
     module ClassMethods
+
+      # extend class methods into singleton class
+      # this lets us define hooks on specific instances as well
+      def new(...)
+        super.tap { _1.singleton_class.include MethodHooks }
+      end
 
       # Hook the given stage of the given method call on the reciever.
       # @param hook [string] a valid hook stage, see {VALID_HOOKS}
@@ -62,7 +62,6 @@ module Accidental
       # @return the hooked object
       def hook(hook, meth, callee = nil, &block)
         raise ArgumentError, "hook: #{hook}?" unless VALID_HOOKS.include? hook
-        raise ArgumentError, "hook: #{name}##{meth}?" unless instance_methods.include? meth
         raise ArgumentError, "hook: #{callee} _and_ block given!" if callee && block
         raise ArgumentError, "hook: #{callee} not callable?" if callee && !callee.respond_to?(:call)
 
@@ -73,6 +72,9 @@ module Accidental
       end
 
     private
+
+      # @return [Module] the host module for hooked methods
+      def hook_host = const_get(:HookHost)
 
       # @param hook [symbol] the hook stage to search for hooks
       # @param meth [symbol] the method to search for hooks
@@ -86,22 +88,28 @@ module Accidental
       # ensure the given method has been overridden to invoke hooks
       # @param meth [symbol] the method to override with a hook
       def ensure_hook(meth)
-        name = "__hooked_#{meth}"
-        return if instance_methods.include?(name.to_sym)
+        return if hook_host.instance_methods.include?(meth.to_sym)
 
-        # redefine the hooked method to send the hooks and then call then aliased name
-        alias_method name, meth
-        define_method(meth) do |*args, **kwargs, &block|
-          exec  = proc { |hook| hook.call(self, *args, **kwargs) }
-          hooks = [singleton_class, self.class]
+        # this way we don't have to deal with aliasing
+        host = const_get(:HookHost)
+
+        # this is a proc so that _self_ is correctly defined
+        # because this is going to get closed over in the define_method block
+        hooks = ->(hook) { hooks_for(hook, meth) }
+
+        # define the hooked method in the hook host module
+        host.define_method(meth) do |*args, **kwargs, &block|
+          exec_hook = ->(hook, *args, **kwargs) do
+            hooks.call(hook).each { |h| h.call(self, *args, **kwargs) }
+          end
 
           begin
-            hooks.flat_map { _1.send(:hooks_for, :before, meth) }.each(&exec)
-            send(name, *args, **kwargs, &block).tap do
-              hooks.flat_map { _1.send(:hooks_for, :after, meth) }.each(&exec)
+            exec_hook.call(:before, *args, **kwargs)
+            super(*args, **kwargs, &block).tap do
+              exec_hook.call(:after, *args, **kwargs)
             end
           rescue => ex
-            hooks.flat_map { _1.send(:hooks_for, :error, meth) }.each { _1.call(self, ex, *args, **kwargs) }
+            exec_hook.call(:error, ex, *args, **kwargs)
             raise
           end
         end
